@@ -8,4 +8,12 @@ User must set the ticker, granularity (candle freqeuncy) and start/end date in t
 A small example on how to call the functions is given, both produce a pandas dataframe with the title of the instrument, 
 this can be placed into an SQL database if so desired. 
 
+
+
+V2: GET_DATA_SQL
+
+PROGRAM ALLOWS FOR ALL INSTRUMENTS TO BE DOWNLOADED AND SAVED INTO AN SQL DATABASE SPLIT BY BID AND ASK PRICE. 
+
+
+
 Happy analysis, and may you be forever profitable.
