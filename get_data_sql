@@ -17,6 +17,14 @@ end_date =  dt.date.today()
 
 # Candle frequency
 granularity = 'H2'
+
+print('<<<<<< Calling API >>>>>>')
+# Api access token
+"""
+"oanda.cfg is a file that is downloaded from OANDA's Rest api, and stored locally"
+"""
+api = tpqoa.tpqoa("oanda.cfg")
+print(api.account_type," | ", api.account_id, "\n")
 #-------------------------------------------------------
 
 #-------------------------------------------------------
@@ -55,14 +63,6 @@ if granularity == 'M1': max_candle = 208
 
 # api maximum period for this frequeny: 
 delta = dt.timedelta(days=max_candle)
-
-print('<<<<<< Calling API >>>>>>')
-# Api access token
-"""
-"oanda.cfg is a file that is downloaded from OANDA's Rest api, and stored locally"
-"""
-api = tpqoa.tpqoa("oanda.cfg")
-print(api.account_type," | ", api.account_id, "\n")
 
 # Iterating from start date, recording date ranges of days
 date_ranges = []
