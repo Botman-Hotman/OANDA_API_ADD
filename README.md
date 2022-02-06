@@ -1,16 +1,18 @@
-# OANDA_API_ADD
+# OANNA_ML - get_data.py
 Getting data is always the hardest part of data science, here is a handy script that uses the OANDA Rest api and 
-tpqoa to pull data from any date range, avoiding the 5000 candle limit.
+tpqoa to pull Forex bid/ask data from any date range, avoiding the 5000 candle limit set by the API.
 
-User must set the granularity (candle freqeuncy) and start/end date in the same format as the given example. 
+The class object allows for an individual instrument or all instruements to be downloaded into a labelled dataframe. 
+SQL functions are provided to convert the dataframe into an SQL db stored in the local directory. 
 
-A small example on how to call the functions is given, both produce a pandas dataframe with the title of the instrument, 
-this can be placed into an SQL database if so desired. 
-
-V2: GET_DATA_SQL
-
-PROGRAM ALLOWS FOR ALL INSTRUMENTS TO BE DOWNLOADED AND SAVED INTO AN SQL DATABASE SPLIT BY BID AND ASK PRICE. 
-
-V3: formating updates, intial call downloads the most up to date candle stick data. Example of how to download all instruments into an SQL database. 
 
 Happy analysis, and may you be forever profitable.
+
+
+
+# OANDA_ML - feature_data.py
+___ in progress ___
+
+
+# OANDA_ML - model_data.py
+___ in progress ___
