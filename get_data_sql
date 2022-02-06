@@ -1,175 +1,202 @@
-#-------------------------------------------------------
+# -------------------------------------------------------
+# Importing Libraries
+# -------------------------------------------------------
 import tpqoa
 import sqlite3
 import pandas as pd
-import numpy as np
 import datetime as dt
 
-from datetime import timedelta, datetime, date
+from datetime import datetime
 from sqlite3 import Error
-#-------------------------------------------------------
+from tqdm.auto import tqdm
 
-#-------------------------------------------------------
-# DATE RANGE AND FREQUENCY
-# Date range to pull data from
-start_date = dt.date(2020,1,1)
-end_date =  dt.date.today()
+# -------------------------------------------------------
 
-# Candle frequency
-granularity = 'H2'
-
-print('<<<<<< Calling API >>>>>>')
-# Api access token
-"""
-"oanda.cfg is a file that is downloaded from OANDA's Rest api, and stored locally"
-"""
-api = tpqoa.tpqoa("oanda.cfg")
-print(api.account_type," | ", api.account_id, "\n")
-#-------------------------------------------------------
-
-#-------------------------------------------------------
-# SQL FUNCTIONS
-def sql_make_db(db_name: str, df: pd.DataFrame):
-    try:
-        con = sqlite3.connect(db_name + '.db')
-        print("Connection established: " + db_name)
+# -------------------------------------------------------
+# API Call Class
+# -------------------------------------------------------
+class APICall:
+    def __init__(self):
+        """
+        Sets the start date, end date and candle frequency to download.
+        """
+        print('<<<<<< Calling API >>>>>>')
+        self.api = tpqoa.tpqoa("oanda.cfg")
+        print(self.api.account_type, " | ", self.api.account_id, "\n")
         
+        print("# Enter Start Date... ex: 2020 1 1 == 1st January 2020")
+        self.start_date = datetime(int(input("Year: ")), 
+                                   int(input("Month: ")), 
+                                   int(input("Day: ")))
+        
+        print('\n')
+        print("### DEVOPS: Press Enter for Current DateTime or Enter Custom End Date.")
+        self.end_date = datetime.now()
+
+        print('\n')
+        print("# Enter Frequency of Candle... ex: 'M15', 'H2', 'D'")
+        self.granularity = input("Candle frequency: ")
+        
+        # Setting the maximum look-back period based on the frequency
+        if self.granularity == 'D':
+            max_candle = 5000
+        if self.granularity == 'H12':
+            max_candle = 2500
+        if self.granularity == 'H8':
+            max_candle = 1658
+        if self.granularity == 'H6':
+            max_candle = 1250
+        if self.granularity == 'H4':
+            max_candle = 832
+        if self.granularity == 'H3':
+            max_candle = 625
+        if self.granularity == 'H2':
+            max_candle = 416
+        if self.granularity == 'H1':
+            max_candle = 208
+        if self.granularity == 'M30':
+            max_candle = 208
+        if self.granularity == 'M15':
+            max_candle = 208
+        if self.granularity == 'M10':
+            max_candle = 208
+        if self.granularity == 'M5':
+            max_candle = 208
+        if self.granularity == 'M1':
+            max_candle = 208
+
+        # api maximum period for this frequency:
+        delta = dt.timedelta(days=max_candle)
+
+        # Iterating from start date, recording date ranges of days
+        self.date_ranges = []
+        temp_start_date = self.start_date
+
+        while temp_start_date < self.end_date:
+            temp_end_date = temp_start_date + delta
+
+            if temp_end_date > self.end_date:
+                temp_end_date = self.end_date
+
+            self.date_ranges.append([temp_start_date, temp_end_date])
+            temp_start_date = temp_end_date + dt.timedelta(days=1)
+    
+    def apicall(self, ticker: str, price: str):
+        """
+        :param ticker: string of instrument EUR_USD, GBP_JPY
+        :param price: string of 'A' = ask price; 'B' = bid price
+        :return: pd.DateFrame of OHLCV instrument data.
+        """
+
+        s_price = ''
+        if price == 'A':
+            s_price = '_Ask'
+        elif price == 'B':
+            s_price = '_Bid'
+        print('Downloading ' + ticker + s_price)
+
+        tables = []
+
+        # For each date range, pass dates into API
+        for start_dt, end_dt in tqdm(self.date_ranges):
+            start = start_dt.strftime("%Y-%m-%dT00:00")
+            end = end_dt.strftime("%Y-%m-%dT%H")
+            try:
+                item = self.api.get_history(instrument=ticker,
+                                       start=start,
+                                       end=end,
+                                       granularity=self.granularity,
+                                       price=price)
+
+                tables.append(item)
+
+            except Exception as exception_:
+                print("An Error has occurred: ", exception_)
+                pass
+
+        single_df = pd.concat(tables)
+        # Format and set column index's and name
+        single_df.drop('complete', axis=1, inplace=True)
+        single_df.reset_index(inplace=True)
+        single_df.rename(
+            columns={'time': 'DateTime', 'o': ticker + '_' + 'Open', 'h': ticker + '_' + 'High', 'l': ticker + '_' + 'Low',
+                     'c': ticker + '_' + 'Close', 'volume': ticker + '_' + 'Volume'}, inplace=True)
+        single_df.set_index(['DateTime'], inplace=True)
+
+        # Puts instrument name as table header (USEFUL FEATURE)
+        # single_df.columns = pd.MultiIndex.from_product([[ticker], single_df.columns])
+
+        return single_df
+        
+    def market_cap(self):
+        """
+        Downloads all OANDA instruments and places into a bid and ask dataframe.  
+        """
+        print('Searching from: ', self.start_date, ' | ', self.end_date, ' at a frequency of:', self.granularity)
+        print('<<<<<< Downloading Instrument Database >>>>>>')
+        inst = pd.DataFrame(self.api.get_instruments()).pop(1)
+        ask = []
+        bid = []
+        for i in range(len(inst)):
+            askdf = self.apicall(inst[i], "A")
+            ask.append(askdf)
+            biddf = self.apicall(inst[i], "B")
+            bid.append(biddf)
+
+        ask = pd.concat(ask, axis=1)
+        bid = pd.concat(bid, axis=1)
+        print('<<<<<< Download Complete >>>>>>')
+
+        return ask, bid
+        
+        
+        
+# -------------------------------------------------------
+# SQL Functions
+# -------------------------------------------------------
+def sql_make_db(db_name: str, table_name: str, df: pd.DataFrame):
+    """
+    :param table_name:
+    :param db_name:
+    :param df: pd.DataFrame
+    :return: SQL database saved to directory
+    """
+    con = None
+    try:
+        con = sqlite3.connect(db_name)
+        print("Connection established: " + db_name)
+
     except Error:
         print(Error)
-    
-    df.to_sql(name=df.columns[0][0], con=con, if_exists='append')
+
+    df.to_sql(name=table_name, con=con, if_exists='replace')
     con.commit()
     con.close()
-#-------------------------------------------------------
-
-#-------------------------------------------------------
-# Setting the maximum lookback period based on the frequency
-max_candle = None
-
-if granularity == 'D':   max_candle = 5000
-if granularity == 'H12': max_candle = 2492
-if granularity == 'H8':  max_candle = 1658
-if granularity == 'H6':  max_candle = 1246
-if granularity == 'H4':  max_candle = 832
-if granularity == 'H3':  max_candle = 625
-if granularity == 'H2':  max_candle = 416
-if granularity == 'H1':  max_candle = 208
-if granularity == 'M30': max_candle = 208
-if granularity == 'M15': max_candle = 208
-if granularity == 'M10': max_candle = 208
-if granularity == 'M5': max_candle = 208
-if granularity == 'M1': max_candle = 208
-
-
-# api maximum period for this frequeny: 
-delta = dt.timedelta(days=max_candle)
-
-# Iterating from start date, recording date ranges of days
-date_ranges = []
-temp_start_date = start_date
-
-while temp_start_date < end_date:
-    temp_end_date = temp_start_date + delta 
+    print("Connection closed: " + db_name)
     
-    if temp_end_date > end_date:
-        temp_end_date = end_date
-    
-    date_ranges.append([temp_start_date, temp_end_date])
-    temp_start_date = temp_end_date + dt.timedelta(days=1)
-#-------------------------------------------------------
-
-#-------------------------------------------------------
-def apicall(ticker: str, price: str, granularity: str):
+def sql_access_table(instrument_table, db_name: str):
     """
-    Download intial price data from API to form database 
+    :param db_name: SQL database saved locally
+    :param instrument_table: a List of instruments to pull from db
+    :return: pd.DataFrame of OHLCV data
     """
-    sPrice =''
-    if price == 'A': sPrice = '_Ask'
-    elif price == 'B': sPrice = '_Bid'
-    print('Downloading '+ticker+sPrice)
-    
-    tables =[]
-    
-    # For each date range, pass dates into API
-    for start_date, end_date in date_ranges:
-        start = start_date.strftime("%Y-%m-%dT00:00")
-        end = end_date.strftime("%Y-%m-%dT%H")
-    
-        item = api.get_history(instrument = ticker, 
-                               start = start, 
-                               end = end, 
-                               granularity = granularity, 
-                               price = price)
-        tables.append(item)
-    
-    single_df = pd.concat(tables)
-    
-    # Format and set column index's and name
-    single_df.drop('complete', axis=1, inplace=True)
-    single_df.reset_index(inplace=True)
-    single_df.rename(columns = {'time':'DateTime', 'o':'Open',  'h':'High', 'l':'Low', 'c':'Close',  'volume':'Volume'}, inplace = True)
-    single_df.set_index(['DateTime'], inplace=True)
-    single_df['Volume']   = single_df.Volume.astype(int)
-    single_df['Close']    = single_df.Close.astype(float)
-    single_df['High']     = single_df.High.astype(float)
-    single_df['Low']      = single_df.Low.astype(float)
-    single_df['Open']     = single_df.Open.astype(float)
-    
-    # Puts instrument name as table header
-    single_df.columns = pd.MultiIndex.from_product([[ticker], single_df.columns])
-    
-    # Load sql database and save instrument to db
-    sql_make_db(('Forex'+sPrice), single_df)
-    return single_df
-#-------------------------------------------------------
+    con = None
+    try:
+        con = sqlite3.connect(db_name)
+        print("Connection established: " + db_name)
 
-#-------------------------------------------------------
-def api_update(df, price: str, granularity):
-    """
-    Update database with current price data
-    """
-    sPrice =''
-    if price   == 'A': sPrice = ' Ask data'
-    elif price == 'B': sPrice = ' Bid data'
-    print('Updating '+df.columns[0][0]+sPrice)
-    
-    now = datetime.now() 
-    check = now.strftime("%Y-%m-%dT%H")
-    df_check = df.index[-1]
-    tables = []
-    item = api.get_history(instrument = df.columns[0][0], 
-                               start = df_check, 
-                               end = check, 
-                               granularity = granularity, 
-                               price = price)
-    tables.append(item)
-    
-    single_df = pd.concat(tables)
-    
-    single_df.drop('complete', axis=1, inplace=True)
-    single_df.reset_index(inplace=True)
-    single_df.rename(columns = {'time':'DateTime', 'o':'Open',  'h':'High', 'l':'Low', 'c':'Close',  'volume':'Volume'}, inplace = True)
-    single_df.set_index(['DateTime'], inplace=True)
-    single_df['Volume']   = single_df.Volume.astype(int)
-    single_df['Close']    = single_df.Close.astype(float)
-    single_df['High']     = single_df.High.astype(float)
-    single_df['Low']      = single_df.Low.astype(float)
-    single_df['Open']     = single_df.Open.astype(float)
-    single_df.drop(index=single_df.index[0], axis=0, inplace=True)
-    
-    # Puts instrument name as table header
-    single_df.columns = pd.MultiIndex.from_product([[df.columns[0][0]], single_df.columns])
-    return df.append(single_df)
-#-------------------------------------------------------
+    except Error as problem:
+        print("An Error occured: ", Error)
 
-#-------------------------------------------------------
-# DOWNLOAD ALL INSTRUMENTS AND CREATE DATABASE.
-print('Searching from: ', start_date, ' | ', end_date, ' at a frequency of:', granularity)
+    df = pd.read_sql("SELECT * FROM " + str(instrument_table), con)
+    con.close()
+    print("Connection Closed: " + db_name)
+    return df
+# -------------------------------------------------------
 
-print('<<<<<< Downloading Instrument Database >>>>>>')
-inst = pd.DataFrame(api.get_instruments()).pop(1)
-for i in range(len(inst)):
-    apicall(inst[i], "A", granularity)
-    apicall(inst[i], "B", granularity)
-print('<<<<<< Download Complete >>>>>>')
-#-------------------------------------------------------
+
+if __name__ == '__main__':
+    model_start = APICall()
+    ask_df, bid_df = model_start.market_cap()
+    sql_make_db('ask', 'all_instruments_ask', ask_df)
+    sql_make_db('bid', 'all_instruments_bid', bid_df)
