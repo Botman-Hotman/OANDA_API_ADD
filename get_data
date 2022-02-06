@@ -10,6 +10,49 @@ from datetime import datetime
 from sqlite3 import Error
 from tqdm.auto import tqdm
 
+
+# -------------------------------------------------------
+
+# -------------------------------------------------------
+# SQL Database
+# -------------------------------------------------------
+class SQLDB:
+    def __init__(self, db_name: str, table_name: str):
+        """
+        :param db_name: The name of the database to create or access.
+        :param table_name: The name of the table within the database to create or access.
+        """
+        self.db_name = db_name
+        self.table_name = table_name
+
+        try:
+            self.con = sqlite3.connect(self.db_name)
+            print("Connection established: " + self.db_name)
+
+        except Error:
+            print("Connection failed: " + self.db_name)
+            print(Error)
+
+    def make_db(self, df: pd.DataFrame):
+        """
+        :param df: pd.DataFrame to save into SQL database
+        :return: SQL database saved to directory
+        """
+
+        df.to_sql(name=self.table_name, con=self.con, if_exists='replace')
+        self.con.commit()
+        self.con.close()
+        print("Connection closed: " + self.db_name)
+
+    def access_table(self):
+        """
+        :return: pd.DataFrame of OHLCV data from SQL database.
+        """
+        df = pd.read_sql("SELECT * FROM " + str(self.table_name), self.con)
+        self.con.close(), print("Connection Closed: " + self.db_name)
+        return df
+
+
 # -------------------------------------------------------
 
 # -------------------------------------------------------
@@ -23,12 +66,12 @@ class APICall:
         print('<<<<<< Calling API >>>>>>')
         self.api = tpqoa.tpqoa("oanda.cfg")
         print(self.api.account_type, " | ", self.api.account_id, "\n")
-        
+
         print("# Enter Start Date... ex: 2020 1 1 == 1st January 2020")
-        self.start_date = datetime(int(input("Year: ")), 
-                                   int(input("Month: ")), 
+        self.start_date = datetime(int(input("Year: ")),
+                                   int(input("Month: ")),
                                    int(input("Day: ")))
-        
+
         print('\n')
         print("### DEVOPS: Press Enter for Current DateTime or Enter Custom End Date.")
         self.end_date = datetime.now()
@@ -36,8 +79,10 @@ class APICall:
         print('\n')
         print("# Enter Frequency of Candle... ex: 'M15', 'H2', 'D'")
         self.granularity = input("Candle frequency: ")
-        
+
         # Setting the maximum look-back period based on the frequency
+        max_candle = None
+
         if self.granularity == 'D':
             max_candle = 5000
         if self.granularity == 'H12':
@@ -80,7 +125,7 @@ class APICall:
 
             self.date_ranges.append([temp_start_date, temp_end_date])
             temp_start_date = temp_end_date + dt.timedelta(days=1)
-    
+
     def apicall(self, ticker: str, price: str):
         """
         :param ticker: string of instrument EUR_USD, GBP_JPY
@@ -103,10 +148,10 @@ class APICall:
             end = end_dt.strftime("%Y-%m-%dT%H")
             try:
                 item = self.api.get_history(instrument=ticker,
-                                       start=start,
-                                       end=end,
-                                       granularity=self.granularity,
-                                       price=price)
+                                            start=start,
+                                            end=end,
+                                            granularity=self.granularity,
+                                            price=price)
 
                 tables.append(item)
 
@@ -115,22 +160,27 @@ class APICall:
                 pass
 
         single_df = pd.concat(tables)
+
         # Format and set column index's and name
         single_df.drop('complete', axis=1, inplace=True)
         single_df.reset_index(inplace=True)
         single_df.rename(
-            columns={'time': 'DateTime', 'o': ticker + '_' + 'Open', 'h': ticker + '_' + 'High', 'l': ticker + '_' + 'Low',
-                     'c': ticker + '_' + 'Close', 'volume': ticker + '_' + 'Volume'}, inplace=True)
+            columns={'time': 'DateTime',
+                     'o': ticker + '_' + 'Open',
+                     'h': ticker + '_' + 'High',
+                     'l': ticker + '_' + 'Low',
+                     'c': ticker + '_' + 'Close',
+                     'volume': ticker + '_' + 'Volume'}, inplace=True)
         single_df.set_index(['DateTime'], inplace=True)
 
-        # Puts instrument name as table header (USEFUL FEATURE)
+        # Puts instrument name as table header in another level
         # single_df.columns = pd.MultiIndex.from_product([[ticker], single_df.columns])
 
         return single_df
-        
+
     def market_cap(self):
         """
-        Downloads all OANDA instruments and places into a bid and ask dataframe.  
+        Downloads all OANDA instruments and places into a bid and ask dataframe.
         """
         print('Searching from: ', self.start_date, ' | ', self.end_date, ' at a frequency of:', self.granularity)
         print('<<<<<< Downloading Instrument Database >>>>>>')
@@ -148,55 +198,9 @@ class APICall:
         print('<<<<<< Download Complete >>>>>>')
 
         return ask, bid
-        
-        
-        
-# -------------------------------------------------------
-# SQL Functions
-# -------------------------------------------------------
-def sql_make_db(db_name: str, table_name: str, df: pd.DataFrame):
-    """
-    :param table_name:
-    :param db_name:
-    :param df: pd.DataFrame
-    :return: SQL database saved to directory
-    """
-    con = None
-    try:
-        con = sqlite3.connect(db_name)
-        print("Connection established: " + db_name)
-
-    except Error:
-        print(Error)
-
-    df.to_sql(name=table_name, con=con, if_exists='replace')
-    con.commit()
-    con.close()
-    print("Connection closed: " + db_name)
-    
-def sql_access_table(instrument_table, db_name: str):
-    """
-    :param db_name: SQL database saved locally
-    :param instrument_table: a List of instruments to pull from db
-    :return: pd.DataFrame of OHLCV data
-    """
-    con = None
-    try:
-        con = sqlite3.connect(db_name)
-        print("Connection established: " + db_name)
-
-    except Error as problem:
-        print("An Error occured: ", Error)
-
-    df = pd.read_sql("SELECT * FROM " + str(instrument_table), con)
-    con.close()
-    print("Connection Closed: " + db_name)
-    return df
-# -------------------------------------------------------
 
 
 if __name__ == '__main__':
-    model_start = APICall()
-    ask_df, bid_df = model_start.market_cap()
-    sql_make_db('ask', 'all_instruments_ask', ask_df)
-    sql_make_db('bid', 'all_instruments_bid', bid_df)
+    ask_df, bid_df = APICall().market_cap()
+    SQLDB('ask', 'all_market_ask').make_db(ask_df)
+    SQLDB('bid', 'all_market_bid').make_db(bid_df)
