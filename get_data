@@ -5,25 +5,22 @@ import tpqoa
 import sqlite3
 import pandas as pd
 import datetime as dt
+import time
 
 from datetime import datetime
 from sqlite3 import Error
 from tqdm.auto import tqdm
-
-
 # -------------------------------------------------------
 
 # -------------------------------------------------------
 # SQL Database
 # -------------------------------------------------------
 class SQLDB:
-    def __init__(self, db_name: str, table_name: str):
+    def __init__(self, db_name: str):
         """
         :param db_name: The name of the database to create or access.
-        :param table_name: The name of the table within the database to create or access.
         """
         self.db_name = db_name
-        self.table_name = table_name
 
         try:
             self.con = sqlite3.connect(self.db_name)
@@ -33,56 +30,96 @@ class SQLDB:
             print("Connection failed: " + self.db_name)
             print(Error)
 
-    def make_db(self, df: pd.DataFrame):
-        """
-        :param df: pd.DataFrame to save into SQL database
-        :return: SQL database saved to directory
-        """
+        self.cursor = self.con.cursor()
 
-        df.to_sql(name=self.table_name, con=self.con, if_exists='replace')
+        try:
+            print('\n'+"Tables Available to Query from " + self.db_name + ":")
+            print(self.cursor.execute("""SELECT name FROM sqlite_master WHERE type='table';""").fetchall(), '\n')
+
+        except sqlite3.Error as error:
+            print("Failed to execute the above query", error)
+
+    def df_to_table(self, df: pd.DataFrame or pd.Series, table_name: str):
+        """
+        :param df: pd.DataFrame to save into SQL database.
+        :param table_name: name to save table in SQL database.
+        :return: SQL database saved to directory.
+        """
+        print("Adding " + table_name + " in " + self.db_name)
+        df.to_sql(name=table_name, con=self.con, if_exists='replace')
         self.con.commit()
         self.con.close()
-        print("Connection closed: " + self.db_name)
+        print("Connection closed: " + self.db_name, '\n')
 
-    def access_table(self):
+    def update_db(self, df: pd.DataFrame or pd.Series, table_name: str):
         """
-        :return: pd.DataFrame of OHLCV data from SQL database.
+        :param df: pd.DataFrame to update existing SQL table.
+        :param table_name: name to save table in SQL database.
+        :return: SQL database updated with new files.
         """
-        df = pd.read_sql("SELECT * FROM " + str(self.table_name), self.con)
-        self.con.close(), print("Connection Closed: " + self.db_name)
+
+        print("Updating " + table_name + " in " + self.db_name)
+        df.to_sql(name=table_name, con=self.con, if_exists='append')
+        self.con.commit()
+        self.con.close()
+        print("Connection closed: " + self.db_name, '\n')
+
+    def table_to_df(self, table_name: str):
+        """
+        :param table_name: name of table in SQL database.
+        :return: pd.DataFrame of data from table in SQL db.
+        """
+        print('Importing ' + table_name + ' From ' + self.db_name)
+        df = pd.read_sql("SELECT * FROM " + table_name, self.con)
+        self.con.close()
+        print("Connection Closed: " + self.db_name, '\n')
         return df
 
+    def query_db(self, query: str):
+        """
+        :param query: an sql query in string format
+        :return: an SQL query into a pd.DataFrame.
+        """
+
+        try:
+            return pd.read_sql_query(query, self.con)
+
+        except Error:
+            print("Failed to execute the above query", Error)
+    
 
 # -------------------------------------------------------
 
 # -------------------------------------------------------
 # API Call Class
 # -------------------------------------------------------
-class APICall:
-    def __init__(self):
+class APIData:    
+    def __init__(self, granularity, start_date):
         """
         Sets the start date, end date and candle frequency to download.
         """
-        print('<<<<<< Calling API >>>>>>')
-        self.api = tpqoa.tpqoa("oanda.cfg")
-        print(self.api.account_type, " | ", self.api.account_id, "\n")
+        # Start Date
+        self.start_date = datetime.strptime(start_date, '%Y-%m-%d')
 
-        print("# Enter Start Date... ex: 2020 1 1 == 1st January 2020")
-        self.start_date = datetime(int(input("Year: ")),
-                                   int(input("Month: ")),
-                                   int(input("Day: ")))
-
-        print('\n')
-        print("### DEVOPS: Press Enter for Current DateTime or Enter Custom End Date.")
+        # End Date
         self.end_date = datetime.now()
 
-        print('\n')
-        print("# Enter Frequency of Candle... ex: 'M15', 'H2', 'D'")
-        self.granularity = input("Candle frequency: ")
+        # Candle Frequency
+        self.granularity = granularity
 
+        print("Model Frequency = " + self.granularity + '\n')
+        print('<<<<<< Calling API >>>>>>')
+        self.api = tpqoa.tpqoa("oanda.cfg")
+        # print(self.api.account_type, " | ", self.api.account_id)
+
+        # List the available instruments and save to db
+        print('\n'+'######  Calling SQL DB  ######')
+        self.inst = pd.DataFrame(self.api.get_instruments()).pop(1)
+        SQLDB('Forex_db').df_to_table(self.inst, 'instruments')
+        
         # Setting the maximum look-back period based on the frequency
         max_candle = None
-
+        
         if self.granularity == 'D':
             max_candle = 5000
         if self.granularity == 'H12':
@@ -125,15 +162,15 @@ class APICall:
 
             self.date_ranges.append([temp_start_date, temp_end_date])
             temp_start_date = temp_end_date + dt.timedelta(days=1)
-
-    def apicall(self, ticker: str, price: str):
+    
+    def get_instrument(self, ticker: str, price: str):
         """
         :param ticker: string of instrument EUR_USD, GBP_JPY
         :param price: string of 'A' = ask price; 'B' = bid price
         :return: pd.DateFrame of OHLCV instrument data.
         """
 
-        s_price = ''
+        s_price = None
         if price == 'A':
             s_price = '_Ask'
         elif price == 'B':
@@ -154,43 +191,44 @@ class APICall:
                                             price=price)
 
                 tables.append(item)
-
+                time.sleep(1)
             except Exception as exception_:
                 print("An Error has occurred: ", exception_)
                 pass
 
         single_df = pd.concat(tables)
-
+        
         # Format and set column index's and name
         single_df.drop('complete', axis=1, inplace=True)
         single_df.reset_index(inplace=True)
         single_df.rename(
-            columns={'time': 'DateTime',
-                     'o': ticker + '_' + 'Open',
-                     'h': ticker + '_' + 'High',
+            columns={'time': 'DateTime', 
+                     'o': ticker + '_' + 'Open', 
+                     'h': ticker + '_' + 'High', 
                      'l': ticker + '_' + 'Low',
-                     'c': ticker + '_' + 'Close',
+                     'c': ticker + '_' + 'Close', 
                      'volume': ticker + '_' + 'Volume'}, inplace=True)
         single_df.set_index(['DateTime'], inplace=True)
 
         # Puts instrument name as table header in another level
         # single_df.columns = pd.MultiIndex.from_product([[ticker], single_df.columns])
-
+        
+        
         return single_df
-
-    def market_cap(self):
+        
+        
+    def all_instruments(self):
         """
-        Downloads all OANDA instruments and places into a bid and ask dataframe.
+        Downloads all OANDA instruments and places into a bid and ask dataframe.  
         """
         print('Searching from: ', self.start_date, ' | ', self.end_date, ' at a frequency of:', self.granularity)
         print('<<<<<< Downloading Instrument Database >>>>>>')
-        inst = pd.DataFrame(self.api.get_instruments()).pop(1)
         ask = []
         bid = []
-        for i in range(len(inst)):
-            askdf = self.apicall(inst[i], "A")
+        for i in range(len(self.inst)):
+            askdf = self.get_instrument(self.inst[i], "A")
             ask.append(askdf)
-            biddf = self.apicall(inst[i], "B")
+            biddf = self.get_instrument(self.inst[i], "B")
             bid.append(biddf)
 
         ask = pd.concat(ask, axis=1)
@@ -198,9 +236,93 @@ class APICall:
         print('<<<<<< Download Complete >>>>>>')
 
         return ask, bid
+    
+    
+    def __update_instrument(self, df: pd.DataFrame, ticker: str, price: str):
+        """
+        Update database with current OHLCV.
+        :param df: Existing pd.DataFrame with OHLCV to update.
+        :param ticker: string of instrument EUR_USD, GBP_JPY.
+        :param price: string of 'A' = ask price; 'B' = bid price.
+        :return: pd.DateFrame of updated OHLCV instrument data.
+        """
+        s_price = None
+        if price == 'A':
+            s_price = '_Ask'
+        elif price == 'B':
+            s_price = '_Bid'
+        
+        # Check using existing database and current datetime 
+        dt_now = dt.datetime.strptime(datetime.now().strftime("%Y-%m-%d %H:00"), '%Y-%m-%d %H:00')
+        dt_df =  dt.datetime.strptime(df.index[-1], '%Y-%m-%d %H:00:00')
+        check = dt_now - dt_df 
 
+        if check > dt.timedelta(hours=df.index[1]-df.index[0]): 
+            try:
+                print('Updating ' + ticker + s_price)
+                df_update = self.api.get_history(instrument=ticker,
+                                                 start=df.index[-1],
+                                                 end=datetime.now().strftime("%Y-%m-%d %H:00"),
+                                                 granularity=self.granularity,
+                                                 price=price)
+                
+                # Format and set column index's and name
+                df_update.drop('complete', axis=1, inplace=True)
+                df_update.reset_index(inplace=True)
+                df_update.rename(columns={'time': 'DateTime', 
+                                          'o': ticker + '_' + 'Open', 
+                                          'h': ticker + '_' + 'High', 
+                                          'l': ticker + '_' + 'Low',
+                                          'c': ticker + '_' + 'Close', 
+                                          'volume': ticker + '_' + 'Volume'}, inplace=True)
+                df_update.set_index(['DateTime'], inplace=True)
+                
+                return df_update.drop(df_update.index[0])
+
+            except Exception as exception_:
+                print("An Error has occurred: ", exception_)
+        
+        else: 
+            print('No Updates to be Downloaded for: ' + ticker + s_price)
+            pass
+            
+    def update_instruments(self, df: pd.DataFrame):
+        """
+        Update database to most recent datetime. 
+        :param df: Existing pd.DataFrame with OHLCV to update.
+        :return: pd.DateFrame of every instrument OHLCV data updated.
+        """
+        print('<<<<<< Updating Instrument Database >>>>>>')
+        ask = []
+        bid = []
+        for i in tqdm(range(len(self.inst))):
+            askdf = self.__update_instrument(df, self.inst[i], "A")
+            ask.append(askdf)
+            biddf = self.__update_instrument(df, self.inst[i], "B")
+            bid.append(biddf)
+        
+        try: 
+            ask = pd.concat(ask, axis=1)
+            bid = pd.concat(bid, axis=1)
+        
+        except: pass
+        
+        print('<<<<<< Update Complete >>>>>>')
+
+        return ask, bid
+       
+
+# -------------------------------------------------------
 
 if __name__ == '__main__':
-    ask_df, bid_df = APICall().market_cap()
-    SQLDB('ask', 'all_market_ask').make_db(ask_df)
-    SQLDB('bid', 'all_market_bid').make_db(bid_df)
+    model_1D = APIData('D', '2010-1-1')
+    
+    # Download all instruments
+    ask_1D, bid_1D = model_1D.all_instruments()
+    SQLDB('Forex_db').df_to_table(ask_1D, 'D1_todo_market_ask')
+    SQLDB('Forex_db').df_to_table(bid_1D, 'D1_todo_market_bid')
+    
+    # Update existing database
+    ask_1D_update, bid_1D_update = model_1D.update_instruments(ask_1D)
+    SQLDB('Forex_db').update_db(ask_1D_update, 'D1_todo_market_ask')
+    SQLDB('Forex_db').update_db(bid_1D_update, 'D1_todo_market_bid')
